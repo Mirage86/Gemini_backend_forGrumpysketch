@@ -1,0 +1,17 @@
+Átírtam a projektet egy úgynevezett Full-Stack (Express + Vite) alkalmazássá. Ez azt jelenti, hogy mostantól van egy saját backend szerverem, ami elrejti a titkos API kulcsot.
+
+Létrehoztam egy server.ts fájlt: Ez az új Node.js / Express backend szerverem. Ez fogadja a kéréseket a mobilappból (vagy a böngészőből), és ez beszélget a Google Gemini API-val. Mivel ez a szerveren fut, a felhasználók (és a hackerek) sosem láthatják a benne lévő kódot és a környezeti változókat (így a .env fájlban lévő VITE_GEMINI_API_KEY-t sem).
+
+Módosítottam a src/utils/gemini.ts fájlt: Ez a fájl eddig közvetlenül a Google-t hívta. Mostantól a saját szerveremet hívja (pl. a /api/evaluate végpontot), elküldi neki a képet, a szerver pedig visszaküldi az értékelést.
+
+Módosítottam a package.json-t: A fejlesztői környezet (npm run dev) mostantól nem csak a Vite-ot indítja el, hanem a server.ts-t is (ami magába foglalja a Vite-ot).
+
+
+Hogyan működik ez most Android Studio-ban (Capacitorral)?
+Amikor kiadom az npm run build parancsot, a Capacitor a dist mappában lévő kliens oldali (frontend) fájlokat fogja beletenni az Android appba.
+Fontos: A server.ts nem kerül bele a mobilalkalmazásba! Azt nekem egy felhőszerveren (pl. Render, Heroku, DigitalOcean, vagy egy saját VPS-en) kell futtatnom.
+
+Mit kell tennem, ha élesben (Play Áruházban) akarod kiadni?
+Szerver bérlése: Fel kell töltenem ezt a kódot egy Node.js futtatására alkalmas szerverre.
+Környezeti változó: A szerveren be kell állítani a GEMINI_API_KEY környezeti változót a titkos kulcsomra.
+URL átírása: Jelenleg a src/utils/gemini.ts relatív útvonalakat használ (pl. /api/evaluate). Ha a mobilappod a felhasználó telefonján fut, nem fogja tudni, hol van a szerver. Ezért a gemini.ts-ben a fetch hívásoknál meg kell majd adni a szervered pontos, éles webcímét (pl. fetch('https://te-szervered-cime.com/api/evaluate', ...)).

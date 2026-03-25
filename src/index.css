@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  overscroll-behavior-y: none; /* Prevents pull-to-refresh on mobile */
+  user-select: none; /* Prevents text selection */
+  -webkit-user-select: none;
+  background-color: #f8fafc;
+}
+
+.canvas-container {
+  touch-action: none; /* Critical for drawing on mobile without scrolling the page */
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}

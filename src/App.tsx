@@ -1,0 +1,977 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Palette, Timer, Eraser, CheckCircle2, RefreshCcw, Star, Trophy, Frown, Globe, Gauge, Video, Home, Volume2, VolumeX, History, ArrowLeft, Archive, Paintbrush, Circle, Download, Lightbulb, Undo2, Redo2, Users } from 'lucide-react';
+import { toPng } from 'html-to-image';
+import { DrawingCanvas, DrawingCanvasRef } from './components/DrawingCanvas';
+import { CrankyCat } from './components/CrankyCat';
+import { getRandomWord, Difficulty } from './utils/words';
+import { evaluateDrawing, generateHintImage, EvaluationResult, evaluateMultiplayerDrawing, MultiplayerEvaluationResult } from './utils/gemini';
+
+type GameState = 'MENU' | 'PLAYING' | 'PASS_DEVICE' | 'EVALUATING' | 'RESULT' | 'HISTORY';
+type Language = 'hu' | 'en';
+
+interface HistoryItem {
+  id: string;
+  word: string;
+  image: string;
+  score: number;
+  feedback: string;
+  date: number;
+  playerMode?: 1 | 2;
+  image2?: string;
+  score2?: number;
+  feedback2?: string;
+  winner?: 1 | 2 | 0;
+  overallFeedback?: string;
+}
+
+const DIFFICULTY_TIMES: Record<Difficulty, number> = {
+  easy: 60,
+  medium: 45,
+  hard: 30
+};
+
+const COLORS = [
+  '#1e293b', // Slate 800
+  '#ef4444', // Red 500
+  '#f97316', // Orange 500
+  '#eab308', // Yellow 500
+  '#22c55e', // Green 500
+  '#3b82f6', // Blue 500
+  '#a855f7', // Purple 500
+  '#ec4899', // Pink 500
+  '#8b5a2b', // Brown
+];
+
+const BRUSH_SIZES = [
+  { id: 'sm', size: 3 },
+  { id: 'md', size: 6 },
+  { id: 'lg', size: 12 },
+  { id: 'xl', size: 24 },
+];
+
+const TRANSLATIONS = {
+  hu: {
+    title: "Grumpy Sketch",
+    subtitle: "A Morcos Cica kíméletlenül őszinte lesz. Készen állsz?",
+    start: "Játék Indítása",
+    drawThis: "Rajzold ezt:",
+    clear: "Törlés",
+    done: "Kész vagyok!",
+    evaluating: "A Morcos Cica elemez...",
+    evaluatingSub: "Vajon felismeri, hogy ez egy",
+    task: "Feladat:",
+    aiOpinion: "Morcos Cica Véleménye",
+    mainMenu: "Főmenü",
+    newGame: "Új Játék",
+    emptyCanvas: "Nem rajzoltál semmit! Próbáld meg újra.",
+    difficulty: "Nehézség:",
+    easy: "Könnyű (60s)",
+    medium: "Közepes (45s)",
+    hard: "Nehéz (30s)",
+    timesUp: "Lejárt az idő!",
+    adPrompt: "Szeretnél még 30 másodpercet egy rövid reklámért cserébe?",
+    watchAd: "+30 mp (Reklám)",
+    finishAnyway: "Inkább befejezem",
+    quit: "Kilépés",
+    history: "Előzmények",
+    back: "Vissza",
+    noHistory: "Még nincsenek rajzok.",
+    score: "Pont",
+    color: "Szín",
+    brushSize: "Ecset mérete",
+    eraser: "Radír",
+    saveImage: "Kép mentése",
+    downloading: "Mentés...",
+    hint: "Segítség",
+    hintAdPrompt: "Nézz meg egy rövid reklámot, és a Morcos Cica megrajzolja helyetted!",
+    generatingHint: "Rajzolás...",
+    onePlayer: "1 Játékos",
+    twoPlayers: "2 Játékos (Verseny)",
+    player1Turn: "1. Játékos köre",
+    player2Turn: "2. Játékos köre",
+    passDevice: "Add át a telefont a 2. Játékosnak!",
+    ready: "Készen állok!",
+    player1: "1. Játékos",
+    player2: "2. Játékos",
+    tie: "Döntetlen!",
+    winner: "Győztes:"
+  },
+  en: {
+    title: "Grumpy Sketch",
+    subtitle: "Cranky Cat will be brutally honest. Are you ready?",
+    start: "Start Game",
+    drawThis: "Draw this:",
+    clear: "Clear",
+    done: "I'm Done!",
+    evaluating: "Cranky Cat is analyzing...",
+    evaluatingSub: "Will she recognize that this is a",
+    task: "Task:",
+    aiOpinion: "Cranky Cat's Opinion",
+    mainMenu: "Main Menu",
+    newGame: "New Game",
+    emptyCanvas: "You didn't draw anything! Try again.",
+    difficulty: "Difficulty:",
+    easy: "Easy (60s)",
+    medium: "Medium (45s)",
+    hard: "Hard (30s)",
+    timesUp: "Time's Up!",
+    adPrompt: "Would you like 30 more seconds in exchange for watching a short ad?",
+    watchAd: "+30s (Watch Ad)",
+    finishAnyway: "Finish anyway",
+    quit: "Quit",
+    history: "History",
+    back: "Back",
+    noHistory: "No drawings yet.",
+    score: "Score",
+    color: "Color",
+    brushSize: "Brush size",
+    eraser: "Eraser",
+    saveImage: "Save Image",
+    downloading: "Saving...",
+    hint: "Hint",
+    hintAdPrompt: "Watch a short ad, and Cranky Cat will draw it for you!",
+    generatingHint: "Drawing...",
+    onePlayer: "1 Player",
+    twoPlayers: "2 Players (Versus)",
+    player1Turn: "Player 1's Turn",
+    player2Turn: "Player 2's Turn",
+    passDevice: "Pass the device to Player 2!",
+    ready: "I'm Ready!",
+    player1: "Player 1",
+    player2: "Player 2",
+    tie: "It's a Tie!",
+    winner: "Winner:"
+  }
+};
+
+export default function App() {
+  const [gameState, setGameState] = useState<GameState>('MENU');
+  const [playerMode, setPlayerMode] = useState<1 | 2>(1);
+  const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(1);
+  const [lang, setLang] = useState<Language>('hu');
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+  const [targetWord, setTargetWord] = useState('');
+  const [timeLeft, setTimeLeft] = useState(DIFFICULTY_TIMES['medium']);
+  const [result, setResult] = useState<EvaluationResult | null>(null);
+  const [multiResult, setMultiResult] = useState<MultiplayerEvaluationResult | null>(null);
+  const [drawnImage, setDrawnImage] = useState<string | null>(null);
+  const [player1Image, setPlayer1Image] = useState<string | null>(null);
+  const [player2Image, setPlayer2Image] = useState<string | null>(null);
+  const [showAdModal, setShowAdModal] = useState(false);
+  const [showHintAdModal, setShowHintAdModal] = useState(false);
+  const [isGeneratingHint, setIsGeneratingHint] = useState(false);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [strokeColor, setStrokeColor] = useState(COLORS[0]);
+  const [strokeWidth, setStrokeWidth] = useState(BRUSH_SIZES[1].size);
+  const [isEraser, setIsEraser] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadingHistoryId, setDownloadingHistoryId] = useState<string | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    const saved = localStorage.getItem('crankyCatHistory');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  const canvasRef = useRef<DrawingCanvasRef>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+
+  const t = TRANSLATIONS[lang];
+
+  const startGame = (mode: 1 | 2 = 1) => {
+    setPlayerMode(mode);
+    setCurrentPlayer(1);
+    setTargetWord(getRandomWord(lang, difficulty));
+    setTimeLeft(DIFFICULTY_TIMES[difficulty]);
+    setResult(null);
+    setMultiResult(null);
+    setDrawnImage(null);
+    setPlayer1Image(null);
+    setPlayer2Image(null);
+    setShowAdModal(false);
+    setShowHintAdModal(false);
+    setIsGeneratingHint(false);
+    setIsEraser(false);
+    setGameState('PLAYING');
+	
+	if (!isMusicPlaying && audioRef.current) {
+      audioRef.current.play().catch(e => console.log("Audio play failed:", e));
+      setIsMusicPlaying(true);
+    }
+  };
+
+  const finishDrawing = async () => {
+    if (canvasRef.current?.isEmpty()) {
+      alert(t.emptyCanvas);
+      return;
+    }
+
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    const base64 = canvasRef.current?.getBase64() || '';
+    
+    if (playerMode === 1) {
+      setDrawnImage(base64);
+      setGameState('EVALUATING');
+
+      const evalResult = await evaluateDrawing(base64, targetWord, lang);
+      setResult(evalResult);
+      
+      const newItem: HistoryItem = {
+        id: Date.now().toString(),
+        word: targetWord,
+        image: base64,
+        score: evalResult.score,
+        feedback: evalResult.feedback,
+        date: Date.now(),
+        playerMode: 1
+      };
+      setHistory(prev => {
+        const newHistory = [newItem, ...prev];
+        localStorage.setItem('crankyCatHistory', JSON.stringify(newHistory));
+        return newHistory;
+      });
+      
+      setGameState('RESULT');
+    } else {
+      if (currentPlayer === 1) {
+        setPlayer1Image(base64);
+        setCurrentPlayer(2);
+        setGameState('PASS_DEVICE');
+      } else {
+        setPlayer2Image(base64);
+        setGameState('EVALUATING');
+
+        const evalResult = await evaluateMultiplayerDrawing(player1Image!, base64, targetWord, lang);
+        setMultiResult(evalResult);
+        
+        const newItem: HistoryItem = {
+          id: Date.now().toString(),
+          word: targetWord,
+          image: player1Image!,
+          score: evalResult.player1Score,
+          feedback: evalResult.player1Feedback,
+          date: Date.now(),
+          playerMode: 2,
+          image2: base64,
+          score2: evalResult.player2Score,
+          feedback2: evalResult.player2Feedback,
+          winner: evalResult.winner,
+          overallFeedback: evalResult.overallFeedback
+        };
+        setHistory(prev => {
+          const newHistory = [newItem, ...prev];
+          localStorage.setItem('crankyCatHistory', JSON.stringify(newHistory));
+          return newHistory;
+        });
+        
+        setGameState('RESULT');
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (gameState === 'PLAYING' && !showAdModal) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current!);
+            setShowAdModal(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [gameState, showAdModal]);
+
+  const handleWatchAd = () => {
+    // TODO: Implement actual Google AdMob Rewarded Video logic here
+    // Example for React Native / Capacitor:
+    // AdMob.showRewardVideoAd().then(() => { ... })
+    
+    alert(lang === 'hu' ? "Képzeld el, hogy itt lement egy AdMob reklám! 📺\n(Kaptál +30 másodpercet)" : "Imagine an AdMob ad played here! 📺\n(You got +30 seconds)");
+    setTimeLeft(prev => prev + 30);
+    setShowAdModal(false);
+  };
+
+  const handleFinishFromModal = () => {
+    setShowAdModal(false);
+    if (canvasRef.current?.isEmpty()) {
+      alert(t.emptyCanvas);
+      setGameState('MENU');
+      return;
+    }
+    finishDrawing();
+  };
+
+  const handleQuit = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setGameState('MENU');
+    setShowAdModal(false);
+  };
+
+  const handleClear = () => {
+    canvasRef.current?.clear();
+  };
+
+  const handleHistoryChange = (undoable: boolean, redoable: boolean) => {
+    setCanUndo(undoable);
+    setCanRedo(redoable);
+  };
+
+  const toggleLanguage = () => {
+    setLang(prev => prev === 'hu' ? 'en' : 'hu');
+  };
+
+  const handleHintClick = () => {
+    setShowHintAdModal(true);
+  };
+
+  const handleWatchHintAd = async () => {
+    setShowHintAdModal(false);
+    setIsGeneratingHint(true);
+    
+    // Call Gemini to generate the image
+    const imageUrl = await generateHintImage(targetWord, lang);
+    if (imageUrl && canvasRef.current) {
+      canvasRef.current.loadImage(imageUrl);
+    } else {
+      alert(lang === 'hu' ? 'A cica most túl lusta volt rajzolni. Próbáld újra!' : 'The cat was too lazy to draw right now. Try again!');
+    }
+    
+    setIsGeneratingHint(false);
+  };
+
+  const toggleMusic = () => {
+    if (audioRef.current) {
+      if (isMusicPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play().catch(e => console.log("Audio play failed:", e));
+      }
+      setIsMusicPlaying(!isMusicPlaying);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!resultRef.current) return;
+    try {
+      setIsDownloading(true);
+      // Small delay to ensure state updates
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const dataUrl = await toPng(resultRef.current, { 
+        cacheBust: true,
+        backgroundColor: '#0f172a', // slate-900
+        style: { margin: '0' }
+      });
+      const link = document.createElement('a');
+      link.download = `grumpy-sketch-${targetWord}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Failed to save image', err);
+      alert(lang === 'hu' ? 'Hiba történt a mentés során.' : 'Failed to save image.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDownloadHistoryItem = async (id: string, word: string) => {
+    const element = document.getElementById(`history-card-${id}`);
+    if (!element) return;
+    try {
+      setDownloadingHistoryId(id);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const dataUrl = await toPng(element, { 
+        cacheBust: true,
+        backgroundColor: '#1e293b', // slate-800
+        style: { margin: '0' },
+        filter: (node: any) => {
+          return !(node.classList && node.classList.contains('hide-on-download'));
+        }
+      });
+      const link = document.createElement('a');
+      link.download = `grumpy-sketch-history-${word}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Failed to save history image', err);
+      alert(lang === 'hu' ? 'Hiba történt a mentés során.' : 'Failed to save image.');
+    } finally {
+      setDownloadingHistoryId(null);
+    }
+  };
+
+  return (
+    <div className="h-[100dvh] w-full bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative pb-[env(safe-area-inset-bottom)]">
+      <audio ref={audioRef} src="/bgm.mp3" loop />
+      
+      {/* Language Switcher & Music Toggle in Menu */}
+      {gameState === 'MENU' && (
+        <>
+          <div className="absolute top-4 left-4 z-10">
+            <button 
+              onClick={toggleMusic}
+              className="p-3 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-300 hover:text-white transition-colors shadow-lg"
+              title="Zene ki/be"
+            >
+              {isMusicPlaying ? <Volume2 size={20} /> : <VolumeX size={20} />}
+            </button>
+          </div>
+          <div className="absolute top-4 right-4 z-10">
+            <button 
+              onClick={toggleLanguage}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-full text-sm font-bold transition-colors shadow-lg"
+            >
+              <Globe size={16} />
+              {lang === 'hu' ? 'English' : 'Magyar'}
+            </button>
+          </div>
+        </>
+      )}
+
+      <AnimatePresence mode="wait">
+        
+        {/* MENU STATE */}
+        {gameState === 'MENU' && (
+          <motion.div 
+            key="menu"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="flex-1 flex flex-col items-center justify-center p-6 text-center"
+          >
+            <div className="w-32 h-32 rounded-full overflow-hidden mb-8 shadow-lg shadow-indigo-500/50 border-4 border-indigo-500 bg-slate-800">
+              <CrankyCat className="w-full h-full" />
+            </div>
+            <h1 className="text-5xl font-black mb-4 tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 to-pink-500">
+              {t.title}
+            </h1>
+            <p className="text-lg text-slate-400 mb-8 max-w-xs">
+              {t.subtitle}
+            </p>
+
+            {/* Difficulty Selector */}
+            <div className="mb-10 w-full max-w-xs">
+              <div className="flex items-center justify-center gap-2 mb-3 text-slate-400">
+                <Gauge size={18} />
+                <span className="font-semibold uppercase tracking-wider text-sm">{t.difficulty}</span>
+              </div>
+              <div className="flex bg-slate-800 p-1 rounded-2xl">
+                {(['easy', 'medium', 'hard'] as Difficulty[]).map((level) => (
+                  <button
+                    key={level}
+                    onClick={() => setDifficulty(level)}
+                    className={`flex-1 py-2 px-2 rounded-xl text-sm font-bold transition-all ${
+                      difficulty === level 
+                        ? 'bg-indigo-500 text-white shadow-md' 
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                    }`}
+                  >
+                    {t[level].split(' ')[0]}
+                  </button>
+                ))}
+              </div>
+              <div className="text-xs text-slate-500 mt-2">
+                {t[difficulty]}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 w-full max-w-xs mb-8">
+              <button 
+                onClick={() => startGame(1)}
+                className="w-full py-4 px-8 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-2xl font-bold text-xl shadow-xl shadow-purple-500/30 active:scale-95 transition-all"
+              >
+                {t.onePlayer}
+              </button>
+              <button 
+                onClick={() => startGame(2)}
+                className="w-full py-4 px-8 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-2xl font-bold text-xl shadow-xl shadow-teal-500/30 active:scale-95 transition-all"
+              >
+                {t.twoPlayers}
+              </button>
+            </div>
+            <button 
+              onClick={() => setGameState('HISTORY')}
+              className="w-full max-w-xs py-3 px-8 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <History size={20} />
+              {t.history}
+            </button>
+          </motion.div>
+        )}
+
+        {/* PLAYING STATE */}
+        {gameState === 'PLAYING' && (
+          <motion.div 
+            key="playing"
+            initial={{ opacity: 0, x: 100 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="flex-1 flex flex-col p-2 sm:p-4 min-h-0 pb-8 sm:pb-4"
+          >
+            <div className="flex justify-between items-center mb-2 sm:mb-4 bg-slate-800 p-3 sm:p-4 rounded-2xl shadow-md shrink-0">
+              <div className="flex items-center gap-2 sm:gap-4">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={handleQuit}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors"
+                    title={t.quit}
+                  >
+                    <Home size={24} />
+                  </button>
+                  <button 
+                    onClick={toggleMusic}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors"
+                    title="Zene ki/be"
+                  >
+                    {isMusicPlaying ? <Volume2 size={24} /> : <VolumeX size={24} />}
+                  </button>
+                  <button 
+                    onClick={handleHintClick}
+                    disabled={isGeneratingHint}
+                    className="p-2 bg-amber-500 hover:bg-amber-400 text-white rounded-xl transition-colors disabled:opacity-50"
+                    title={t.hint}
+                  >
+                    <Lightbulb size={24} />
+                  </button>
+                </div>
+                <div className="flex flex-col items-center">
+                  {playerMode === 2 && (
+                    <span className="text-indigo-400 text-xs font-bold uppercase tracking-wider mb-1">
+                      {currentPlayer === 1 ? t.player1Turn : t.player2Turn}
+                    </span>
+                  )}
+                  <span className="text-slate-400 text-sm font-semibold uppercase tracking-wider">{t.drawThis}</span>
+                  <span className="text-2xl font-bold text-emerald-400">{targetWord}</span>
+                </div>
+              </div>
+              <div className={`flex items-center gap-1 sm:gap-2 text-xl sm:text-2xl font-black ${timeLeft <= 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                <Timer size={24} className="sm:w-7 sm:h-7" />
+                {timeLeft}s
+              </div>
+            </div>
+
+            <div className="flex-1 relative mb-2 sm:mb-4 flex flex-col gap-2 min-h-0">
+              {/* Drawing Tools */}
+              <div className="flex items-center justify-between bg-white p-2 rounded-2xl border-4 border-slate-200 shadow-sm shrink-0">
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-1">
+                  {COLORS.map(color => (
+                    <button
+                      key={color}
+                      onClick={() => {
+                        setStrokeColor(color);
+                        setIsEraser(false);
+                      }}
+                      className={`w-8 h-8 rounded-full shrink-0 transition-transform ${strokeColor === color && !isEraser ? 'scale-110 ring-2 ring-offset-2 ring-indigo-500' : 'hover:scale-110'}`}
+                      style={{ backgroundColor: color }}
+                      title={t.color}
+                    />
+                  ))}
+                </div>
+                
+                <div className="flex items-center gap-2 ml-2 pl-2 border-l-2 border-slate-100 shrink-0">
+                  <div className="flex items-center gap-1 mr-1 border-r-2 border-slate-100 pr-2">
+                    <button
+                      onClick={() => canvasRef.current?.undo()}
+                      disabled={!canUndo}
+                      className={`p-2 rounded-xl transition-colors ${canUndo ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
+                      title={lang === 'hu' ? 'Visszavonás' : 'Undo'}
+                    >
+                      <Undo2 size={20} />
+                    </button>
+                    <button
+                      onClick={() => canvasRef.current?.redo()}
+                      disabled={!canRedo}
+                      className={`p-2 rounded-xl transition-colors ${canRedo ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300'}`}
+                      title={lang === 'hu' ? 'Újra' : 'Redo'}
+                    >
+                      <Redo2 size={20} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 mr-1">
+                    {BRUSH_SIZES.map(brush => (
+                      <button
+                        key={brush.id}
+                        onClick={() => setStrokeWidth(brush.size)}
+                        className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${strokeWidth === brush.size ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:bg-slate-100'}`}
+                        title={t.brushSize}
+                      >
+                        <Circle size={brush.size + 4} fill="currentColor" />
+                      </button>
+                    ))}
+                  </div>
+                  
+                  <button
+                    onClick={() => setIsEraser(!isEraser)}
+                    className={`p-2 rounded-xl transition-colors ${isEraser ? 'bg-indigo-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    title={t.eraser}
+                  >
+                    <Eraser size={20} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 relative min-h-0">
+                {isGeneratingHint && (
+                  <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center">
+                    <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <p className="text-indigo-600 font-bold animate-pulse">{t.generatingHint}</p>
+                  </div>
+                )}
+                <DrawingCanvas 
+                  ref={canvasRef} 
+                  strokeWidth={strokeWidth} 
+                  strokeColor={isEraser ? '#ffffff' : strokeColor} 
+                  onHistoryChange={handleHistoryChange}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 sm:gap-4 shrink-0">
+              <button 
+                onClick={handleClear}
+                className="flex-1 py-3 sm:py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-all"
+              >
+                <RefreshCcw size={20} className="sm:w-6 sm:h-6" />
+                {t.clear}
+              </button>
+              <button 
+                onClick={finishDrawing}
+                className="flex-[2] py-3 sm:py-4 bg-emerald-500 hover:bg-emerald-400 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 active:scale-95 transition-all"
+              >
+                <CheckCircle2 size={20} className="sm:w-6 sm:h-6" />
+                {t.done}
+              </button>
+            </div>
+
+            {/* AdMob Extension Modal */}
+            {showAdModal && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="bg-slate-800 p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center border border-slate-700"
+                >
+                  <h3 className="text-2xl font-black mb-2 text-white">{t.timesUp}</h3>
+                  <p className="text-slate-400 mb-6">{t.adPrompt}</p>
+                  
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={handleWatchAd}
+                      className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 active:scale-95 transition-all"
+                    >
+                      <Video size={20} />
+                      {t.watchAd}
+                    </button>
+                    <button 
+                      onClick={handleFinishFromModal}
+                      className="w-full py-4 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold active:scale-95 transition-all"
+                    >
+                      {t.finishAnyway}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+
+            {/* Hint Ad Modal */}
+            {showHintAdModal && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="bg-slate-800 p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center border border-slate-700"
+                >
+                  <h3 className="text-2xl font-black mb-2 text-amber-400">{t.hint}</h3>
+                  <p className="text-slate-400 mb-6">{t.hintAdPrompt}</p>
+                  
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={handleWatchHintAd}
+                      className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-orange-500/30 active:scale-95 transition-all"
+                    >
+                      <Video size={20} />
+                      {t.watchAd}
+                    </button>
+                    <button 
+                      onClick={() => setShowHintAdModal(false)}
+                      className="w-full py-4 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold active:scale-95 transition-all"
+                    >
+                      {t.back}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* PASS DEVICE STATE */}
+        {gameState === 'PASS_DEVICE' && (
+          <motion.div 
+            key="pass"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex-1 flex flex-col items-center justify-center p-4 text-center"
+          >
+            <Users size={64} className="text-indigo-400 mb-6" />
+            <h2 className="text-3xl font-black text-white mb-4">{t.passDevice}</h2>
+            <p className="text-slate-300 mb-8 max-w-md">
+              {lang === 'hu' ? 'Az 1. Játékos befejezte a rajzolást. Add át a telefont a 2. Játékosnak, hogy ő is megpróbálja!' : 'Player 1 finished drawing. Pass the phone to Player 2 so they can try!'}
+            </p>
+            <button
+              onClick={() => {
+                canvasRef.current?.clear();
+                setTimeLeft(DIFFICULTY_TIMES[difficulty]);
+                setShowAdModal(false);
+                setGameState('PLAYING');
+              }}
+              className="py-4 px-12 bg-indigo-500 hover:bg-indigo-400 text-white rounded-2xl font-bold text-xl shadow-lg shadow-indigo-500/30 active:scale-95 transition-all"
+            >
+              {t.ready}
+            </button>
+          </motion.div>
+        )}
+
+        {/* EVALUATING STATE */}
+        {gameState === 'EVALUATING' && (
+          <motion.div 
+            key="evaluating"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col items-center justify-center p-6 text-center"
+          >
+            <div className="relative w-32 h-32 mb-8">
+              <div className="absolute inset-0 border-4 border-indigo-500/30 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-indigo-500 rounded-full border-t-transparent animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center rounded-full overflow-hidden p-2 bg-slate-800">
+                <CrankyCat className="w-full h-full opacity-80" />
+              </div>
+            </div>
+            <h2 className="text-3xl font-bold mb-2">{t.evaluating}</h2>
+            <p className="text-slate-400">
+              {playerMode === 1 ? t.evaluatingSub : (lang === 'hu' ? 'Vajon melyikőtök rajzolt jobban egy' : 'I wonder who drew a better')} <span className="text-emerald-400 font-bold">{targetWord}</span>{lang === 'hu' ? '-t?' : '?'}
+            </p>
+          </motion.div>
+        )}
+
+        {/* RESULT STATE */}
+        {gameState === 'RESULT' && (
+          <motion.div 
+            key="result"
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex-1 flex flex-col p-6 overflow-y-auto no-scrollbar"
+          >
+            <div ref={resultRef} className="flex flex-col items-center bg-slate-900 p-4 rounded-3xl mb-4">
+              <div className="text-center mb-6">
+                <h2 className="text-slate-400 font-semibold uppercase tracking-wider mb-1">{t.task} {targetWord}</h2>
+                
+                {playerMode === 1 && result && (
+                  <div className="flex justify-center items-center gap-2">
+                    {result.score >= 8 ? <Trophy className="text-yellow-400" size={40} /> : 
+                     result.score >= 5 ? <Star className="text-slate-300" size={40} /> : 
+                     <Frown className="text-red-400" size={40} />}
+                    <span className="text-6xl font-black">{result.score}<span className="text-3xl text-slate-500">/10</span></span>
+                  </div>
+                )}
+                
+                {playerMode === 2 && multiResult && (
+                  <div className="flex flex-col items-center">
+                    <h2 className="text-3xl font-black text-white mb-2">
+                      {multiResult.winner === 0 ? t.tie : `${t.winner} ${multiResult.winner === 1 ? t.player1 : t.player2}`}
+                    </h2>
+                  </div>
+                )}
+              </div>
+
+              {playerMode === 1 && drawnImage && result && (
+                <>
+                  <div className="bg-white p-2 rounded-2xl shadow-lg mb-6 mx-auto w-full max-w-sm transform rotate-2">
+                    <img src={drawnImage} alt="A rajzod" className="w-full h-auto rounded-xl border border-slate-100" />
+                  </div>
+                  <div className="flex items-start gap-4 max-w-md mx-auto w-full">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-slate-800 border-2 border-slate-600 shadow-lg shrink-0 overflow-hidden">
+                      <CrankyCat className="w-full h-full" />
+                    </div>
+                    <div className="relative bg-slate-100 text-slate-900 p-4 sm:p-5 rounded-2xl rounded-tl-none shadow-xl flex-1">
+                      <div className="absolute top-0 -left-3 w-0 h-0 border-t-[16px] border-t-slate-100 border-l-[16px] border-l-transparent"></div>
+                      <p className="text-base sm:text-lg font-medium italic">
+                        "{result.feedback}"
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {playerMode === 2 && multiResult && player1Image && player2Image && (
+                <div className="w-full flex flex-col gap-6">
+                  <div className="flex items-start gap-4 max-w-md mx-auto w-full mb-4">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-slate-800 border-2 border-slate-600 shadow-lg shrink-0 overflow-hidden">
+                      <CrankyCat className="w-full h-full" />
+                    </div>
+                    <div className="relative bg-slate-100 text-slate-900 p-4 sm:p-5 rounded-2xl rounded-tl-none shadow-xl flex-1">
+                      <div className="absolute top-0 -left-3 w-0 h-0 border-t-[16px] border-t-slate-100 border-l-[16px] border-l-transparent"></div>
+                      <p className="text-base sm:text-lg font-medium italic">
+                        "{multiResult.overallFeedback}"
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row gap-4 w-full">
+                    {/* Player 1 Card */}
+                    <div className={`flex-1 bg-slate-800 rounded-3xl p-4 border-4 ${multiResult.winner === 1 ? 'border-amber-400' : 'border-slate-700'}`}>
+                      <h3 className="text-xl font-bold text-white mb-2 text-center">{t.player1}</h3>
+                      <img src={player1Image} className="w-full bg-white rounded-xl mb-4" />
+                      <div className="text-center">
+                        <div className="text-4xl font-black text-indigo-400 mb-2">{multiResult.player1Score}/10</div>
+                        <p className="text-slate-300 text-sm italic">"{multiResult.player1Feedback}"</p>
+                      </div>
+                    </div>
+                    
+                    {/* Player 2 Card */}
+                    <div className={`flex-1 bg-slate-800 rounded-3xl p-4 border-4 ${multiResult.winner === 2 ? 'border-amber-400' : 'border-slate-700'}`}>
+                      <h3 className="text-xl font-bold text-white mb-2 text-center">{t.player2}</h3>
+                      <img src={player2Image} className="w-full bg-white rounded-xl mb-4" />
+                      <div className="text-center">
+                        <div className="text-4xl font-black text-indigo-400 mb-2">{multiResult.player2Score}/10</div>
+                        <p className="text-slate-300 text-sm italic">"{multiResult.player2Feedback}"</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-auto flex flex-col gap-3">
+              {playerMode === 1 && (
+                <button 
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 active:scale-95 transition-all disabled:opacity-70 disabled:active:scale-100"
+                >
+                  <Download size={24} />
+                  {isDownloading ? t.downloading : t.saveImage}
+                </button>
+              )}
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setGameState('MENU')}
+                  className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-2xl font-bold active:scale-95 transition-all"
+                >
+                  {t.mainMenu}
+                </button>
+                <button 
+                  onClick={() => startGame(playerMode)}
+                  className="flex-[2] py-4 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-purple-500/30 active:scale-95 transition-all"
+                >
+                  <RefreshCcw size={24} />
+                  {t.newGame}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+      </AnimatePresence>
+
+      {/* HISTORY STATE */}
+      <AnimatePresence>
+        {gameState === 'HISTORY' && (
+          <motion.div 
+            key="history"
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="absolute inset-0 bg-slate-900 z-50 flex flex-col p-6 overflow-hidden"
+          >
+            <div className="flex items-center mb-6">
+              <button 
+                onClick={() => setGameState('MENU')}
+                className="p-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors shadow-lg flex items-center gap-2"
+              >
+                <ArrowLeft size={20} />
+                <span className="font-bold">{t.back}</span>
+              </button>
+              <h2 className="text-2xl font-black ml-4 text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-500">
+                {t.history}
+              </h2>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-2 pb-10 space-y-6">
+              {history.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                  <Archive size={48} className="mb-4 opacity-50" />
+                  <p className="text-lg font-medium">{t.noHistory}</p>
+                </div>
+              ) : (
+                history.map((item) => (
+                  <div key={item.id} id={`history-card-${item.id}`} className="bg-slate-800 rounded-3xl p-5 shadow-xl border border-slate-700/50 flex flex-col md:flex-row gap-6">
+                    {item.playerMode === 2 ? (
+                      <div className="w-full md:w-64 shrink-0 flex gap-2 bg-white p-2 rounded-2xl transform -rotate-1 shadow-md">
+                        <div className="flex-1">
+                          <img src={item.image} alt={item.word} className="w-full h-auto rounded-xl border border-slate-100 mb-1" />
+                          <div className="text-center text-xs font-bold text-indigo-500">P1: {item.score}/10</div>
+                        </div>
+                        <div className="flex-1">
+                          <img src={item.image2} alt={item.word} className="w-full h-auto rounded-xl border border-slate-100 mb-1" />
+                          <div className="text-center text-xs font-bold text-indigo-500">P2: {item.score2}/10</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full md:w-48 shrink-0 bg-white p-2 rounded-2xl transform -rotate-1 shadow-md">
+                        <img src={item.image} alt={item.word} className="w-full h-auto rounded-xl border border-slate-100" />
+                      </div>
+                    )}
+                    <div className="flex-1 flex flex-col">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">{new Date(item.date).toLocaleDateString()}</span>
+                          <h3 className="text-2xl font-black text-emerald-400 capitalize">{item.word}</h3>
+                          {item.playerMode === 2 && (
+                            <span className="text-sm font-bold text-amber-400">
+                              {item.winner === 0 ? t.tie : `${t.winner} ${item.winner === 1 ? t.player1 : t.player2}`}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {item.playerMode !== 2 && (
+                            <div className="flex items-center gap-1 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700">
+                              <Star className="text-yellow-400" size={16} />
+                              <span className="font-black text-lg">{item.score}<span className="text-xs text-slate-500">/10</span></span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => handleDownloadHistoryItem(item.id, item.word)}
+                            disabled={downloadingHistoryId === item.id}
+                            className="hide-on-download p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white rounded-xl transition-colors disabled:opacity-50"
+                            title={t.saveImage}
+                          >
+                            <Download size={20} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="bg-slate-900/50 p-4 rounded-2xl text-slate-300 italic text-sm sm:text-base border-l-4 border-indigo-500">
+                        "{item.playerMode === 2 ? item.overallFeedback : item.feedback}"
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
