@@ -5,7 +5,6 @@ import path from "path";
 import cors from "cors";
 
 const app = express();
-app.use(cors());
 const PORT = 3000;
 
 // Növeljük a JSON payload limitet a base64 képek miatt

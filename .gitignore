@@ -8,3 +8,4 @@ coverage/
 !.env.example
 # Environment variables
 .env
+ikonok/android
