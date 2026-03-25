@@ -6,6 +6,7 @@ import { DrawingCanvas, DrawingCanvasRef } from './components/DrawingCanvas';
 import { CrankyCat } from './components/CrankyCat';
 import { getRandomWord, Difficulty } from './utils/words';
 import { evaluateDrawing, generateHintImage, EvaluationResult, evaluateMultiplayerDrawing, MultiplayerEvaluationResult } from './utils/gemini';
+import { initializeAdMob, showBannerAd, removeBannerAd } from './utils/admob';
 
 type GameState = 'MENU' | 'PLAYING' | 'PASS_DEVICE' | 'EVALUATING' | 'RESULT' | 'HISTORY';
 type Language = 'hu' | 'en';
@@ -180,6 +181,18 @@ export default function App() {
   const resultRef = useRef<HTMLDivElement>(null);
 
   const t = TRANSLATIONS[lang];
+  
+  useEffect(() => {
+    const setupAdMob = async () => {
+      await initializeAdMob();
+      await showBannerAd();
+    };
+    setupAdMob();
+
+    return () => {
+      removeBannerAd();
+    };
+  }, []);
 
   const startGame = (mode: 1 | 2 = 1) => {
     setPlayerMode(mode);
@@ -411,7 +424,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-[100dvh] w-full bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative pb-[env(safe-area-inset-bottom)]">
+    <div className="h-[100dvh] w-full bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative pb-[calc(env(safe-area-inset-bottom)+120px)]">
       <audio ref={audioRef} src="/bgm.mp3" loop />
       
       {/* Language Switcher & Music Toggle in Menu */}
@@ -447,30 +460,30 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, y: -50 }}
-            className="flex-1 flex flex-col items-center justify-center p-6 text-center"
+            className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 text-center"
           >
-            <div className="w-32 h-32 rounded-full overflow-hidden mb-8 shadow-lg shadow-indigo-500/50 border-4 border-indigo-500 bg-slate-800">
+            <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full overflow-hidden mb-4 sm:mb-8 mt-8 sm:mt-0 shadow-lg shadow-indigo-500/50 border-4 border-indigo-500 bg-slate-800 shrink-0">
               <CrankyCat className="w-full h-full" />
             </div>
-            <h1 className="text-5xl font-black mb-4 tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 to-pink-500">
+            <h1 className="text-4xl sm:text-5xl font-black mb-2 sm:mb-4 tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 to-pink-500">
               {t.title}
             </h1>
-            <p className="text-lg text-slate-400 mb-8 max-w-xs">
+            <p className="text-base sm:text-lg text-slate-400 mb-4 sm:mb-8 max-w-xs">
               {t.subtitle}
             </p>
 
             {/* Difficulty Selector */}
-            <div className="mb-10 w-full max-w-xs">
-              <div className="flex items-center justify-center gap-2 mb-3 text-slate-400">
+            <div className="mb-6 sm:mb-10 w-full max-w-xs">
+              <div className="flex items-center justify-center gap-2 mb-2 sm:mb-3 text-slate-400">
                 <Gauge size={18} />
-                <span className="font-semibold uppercase tracking-wider text-sm">{t.difficulty}</span>
+                <span className="font-semibold uppercase tracking-wider text-xs sm:text-sm">{t.difficulty}</span>
               </div>
               <div className="flex bg-slate-800 p-1 rounded-2xl">
                 {(['easy', 'medium', 'hard'] as Difficulty[]).map((level) => (
                   <button
                     key={level}
                     onClick={() => setDifficulty(level)}
-                    className={`flex-1 py-2 px-2 rounded-xl text-sm font-bold transition-all ${
+                    className={`flex-1 py-1.5 sm:py-2 px-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${
                       difficulty === level 
                         ? 'bg-indigo-500 text-white shadow-md' 
                         : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
@@ -480,30 +493,30 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <div className="text-xs text-slate-500 mt-2">
+              <div className="text-[10px] sm:text-xs text-slate-500 mt-1 sm:mt-2">
                 {t[difficulty]}
               </div>
             </div>
 
-            <div className="flex flex-col gap-4 w-full max-w-xs mb-8">
+            <div className="flex flex-col gap-3 sm:gap-4 w-full max-w-xs mb-4 sm:mb-8">
               <button 
                 onClick={() => startGame(1)}
-                className="w-full py-4 px-8 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-2xl font-bold text-xl shadow-xl shadow-purple-500/30 active:scale-95 transition-all"
+                className="w-full py-3 sm:py-4 px-6 sm:px-8 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-2xl font-bold text-lg sm:text-xl shadow-xl shadow-purple-500/30 active:scale-95 transition-all"
               >
                 {t.onePlayer}
               </button>
               <button 
                 onClick={() => startGame(2)}
-                className="w-full py-4 px-8 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-2xl font-bold text-xl shadow-xl shadow-teal-500/30 active:scale-95 transition-all"
+                className="w-full py-3 sm:py-4 px-6 sm:px-8 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-2xl font-bold text-lg sm:text-xl shadow-xl shadow-teal-500/30 active:scale-95 transition-all"
               >
                 {t.twoPlayers}
               </button>
             </div>
             <button 
               onClick={() => setGameState('HISTORY')}
-              className="w-full max-w-xs py-3 px-8 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+              className="w-full max-w-xs py-2.5 sm:py-3 px-6 sm:px-8 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-2xl font-bold text-base sm:text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 mb-4 sm:mb-8"
             >
-              <History size={20} />
+              <History size={18} className="sm:w-5 sm:h-5" />
               {t.history}
             </button>
           </motion.div>
@@ -562,8 +575,8 @@ export default function App() {
 
             <div className="flex-1 relative mb-2 sm:mb-4 flex flex-col gap-2 min-h-0">
               {/* Drawing Tools */}
-              <div className="flex items-center justify-between bg-white p-2 rounded-2xl border-4 border-slate-200 shadow-sm shrink-0">
-                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-1">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-white p-2 rounded-2xl border-4 border-slate-200 shadow-sm shrink-0 gap-2 sm:gap-0">
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar px-1 pb-1 sm:pb-0">
                   {COLORS.map(color => (
                     <button
                       key={color}
@@ -578,8 +591,8 @@ export default function App() {
                   ))}
                 </div>
                 
-                <div className="flex items-center gap-2 ml-2 pl-2 border-l-2 border-slate-100 shrink-0">
-                  <div className="flex items-center gap-1 mr-1 border-r-2 border-slate-100 pr-2">
+                <div className="flex items-center justify-between sm:justify-end gap-1 sm:gap-2 sm:ml-2 sm:pl-2 sm:border-l-2 border-slate-100 shrink-0 overflow-x-auto no-scrollbar pt-1 sm:pt-0 border-t-2 sm:border-t-0">
+                  <div className="flex items-center gap-1 sm:mr-1 border-r-2 border-slate-100 pr-1 sm:pr-2 shrink-0">
                     <button
                       onClick={() => canvasRef.current?.undo()}
                       disabled={!canUndo}
@@ -597,7 +610,7 @@ export default function App() {
                       <Redo2 size={20} />
                     </button>
                   </div>
-                  <div className="flex items-center gap-1 mr-1">
+                  <div className="flex items-center gap-1 sm:mr-1 shrink-0">
                     {BRUSH_SIZES.map(brush => (
                       <button
                         key={brush.id}
@@ -612,7 +625,7 @@ export default function App() {
                   
                   <button
                     onClick={() => setIsEraser(!isEraser)}
-                    className={`p-2 rounded-xl transition-colors ${isEraser ? 'bg-indigo-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    className={`p-2 rounded-xl transition-colors shrink-0 ${isEraser ? 'bg-indigo-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                     title={t.eraser}
                   >
                     <Eraser size={20} />
@@ -968,6 +981,8 @@ export default function App() {
                   </div>
                 ))
               )}
+              {/* Extra spacer for AdMob banner */}
+              <div className="h-24 w-full shrink-0"></div>
             </div>
           </motion.div>
         )}
