@@ -5,6 +5,7 @@ import path from "path";
 import cors from "cors";
 
 const app = express();
+app.use(cors());
 const PORT = 3000;
 
 // Növeljük a JSON payload limitet a base64 képek miatt
@@ -173,7 +174,7 @@ app.post("/api/generate-hint", async (req, res) => {
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData) {
           const base64EncodeString: string = part.inlineData.data;
-          return res.json({ image: \`data:image/png;base64,\${base64EncodeString}\` });
+          return res.json({ image: `data:image/png;base64,${base64EncodeString}` });
         }
       }
     }

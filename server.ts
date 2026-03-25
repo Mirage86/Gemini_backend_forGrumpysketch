@@ -174,7 +174,7 @@ app.post("/api/generate-hint", async (req, res) => {
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData) {
           const base64EncodeString: string = part.inlineData.data;
-          return res.json({ image: \`data:image/png;base64,\${base64EncodeString}\` });
+          return res.json({ image: `data:image/png;base64,${base64EncodeString}` });
         }
       }
     }
@@ -203,7 +203,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(\`Szerver fut a http://localhost:\${PORT} címen\`);
+    console.log(\`Szerver fut a http://localhost:${PORT} címen`);
   });
 }
 
